@@ -131,6 +131,12 @@ def should_skip(rel_path: Path, dir_patterns: list[str], file_patterns: list[str
     if rel_path.name in (MANIFEST_NAME, "sync-config.json"):
         return True
 
+    # Skip Windows reserved device names (NUL, CON, PRN, AUX, etc.)
+    RESERVED = {"NUL", "CON", "PRN", "AUX", "COM1", "COM2", "COM3", "COM4",
+                "LPT1", "LPT2", "LPT3"}
+    if rel_path.stem.upper() in RESERVED:
+        return True
+
     # Check directory patterns: if any component matches, skip
     for part in rel_path.parts:
         for dp in dir_patterns:
