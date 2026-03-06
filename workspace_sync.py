@@ -2,10 +2,12 @@
 Workspace sync: local workspace <-> Dropbox.
 
 Usage:
-    python workspace_sync.py push-workspace   # local -> Dropbox
-    python workspace_sync.py pull-workspace   # Dropbox -> local
-    python workspace_sync.py status           # show what's changed
-    python workspace_sync.py init             # create config file
+    python workspace_sync.py push-workspace [--yes]  # local -> Dropbox
+    python workspace_sync.py pull-workspace [--yes]  # Dropbox -> local
+    python workspace_sync.py status                  # show what's changed
+    python workspace_sync.py init                    # create config file
+
+    --yes (-y): skip confirmation prompt (still stops if there are conflicts)
 
 Reads .syncignore (in local workspace) for exclusion patterns.
 Always previews before syncing. Asks on conflicts.
@@ -596,7 +598,7 @@ def build_manifest_files(local_root: Path, remote_root: Path,
 # Commands
 # ---------------------------------------------------------------------------
 
-def cmd_sync(direction: str):
+def cmd_sync(direction: str, auto_yes: bool = False):
     local_root, remote_root = load_config()
 
     if direction == "push":
@@ -629,14 +631,19 @@ def cmd_sync(direction: str):
 
     resolutions = []
     if changes["conflict"]:
+        if auto_yes:
+            print("CONFLICTS require interactive resolution. Cannot use --yes.")
+            print("Run again without --yes to resolve conflicts.")
+            return
         resolutions = resolve_conflicts(
             changes["conflict"], source_label, dest_label, direction
         )
 
-    proceed = input("Proceed with sync? [y/n] ").strip().lower()
-    if proceed not in ("y", "yes"):
-        print("Cancelled.")
-        return
+    if not auto_yes:
+        proceed = input("Proceed with sync? [y/n] ").strip().lower()
+        if proceed not in ("y", "yes"):
+            print("Cancelled.")
+            return
 
     copied, deleted, resolved = execute_sync(
         changes, resolutions, source_root, dest_root
@@ -710,21 +717,22 @@ def cmd_status():
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python workspace_sync.py [init|push-workspace|pull-workspace|status]")
+        print("Usage: python workspace_sync.py [init|push-workspace|pull-workspace|status] [--yes]")
         sys.exit(1)
 
     cmd = sys.argv[1]
+    auto_yes = "--yes" in sys.argv or "-y" in sys.argv
     if cmd == "push-workspace":
-        cmd_sync("push")
+        cmd_sync("push", auto_yes=auto_yes)
     elif cmd == "pull-workspace":
-        cmd_sync("pull")
+        cmd_sync("pull", auto_yes=auto_yes)
     elif cmd == "status":
         cmd_status()
     elif cmd == "init":
         cmd_init()
     else:
         print(f"Unknown command: {cmd}")
-        print("Usage: python workspace_sync.py [init|push-workspace|pull-workspace|status]")
+        print("Usage: python workspace_sync.py [init|push-workspace|pull-workspace|status] [--yes]")
         sys.exit(1)
 
 
