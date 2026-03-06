@@ -1,0 +1,184 @@
+WORKSPACE SYNC — SETUP INSTRUCTIONS
+=====================================
+
+Syncs your Claude Code workspace between computers via Dropbox.
+No dependencies beyond Python 3.10+ (standard library only).
+
+
+WHAT IT DOES
+------------
+
+- push-workspace: copies changed files from local workspace -> Dropbox
+- pull-workspace: copies changed files from Dropbox -> local workspace
+- status: shows what's changed on each side since last sync
+
+Uses content hashing (SHA-256) for reliable change detection across
+machines. Previews everything before syncing. Asks you to resolve
+conflicts. Never deletes files automatically — deletions require typing
+the full word 'delete', never a single keystroke.
+
+Files matching patterns in .syncignore are excluded (large data, git
+repos, build artifacts, etc.).
+
+
+THIS COMPUTER (ALREADY SET UP)
+-------------------------------
+
+The workspace-sync/ directory lives inside your workspace at:
+    C:/Users/docto/Claude Code/workspace-sync/
+
+To use:
+    cd "C:/Users/docto/Claude Code/workspace-sync"
+    python workspace_sync.py push-workspace
+    python workspace_sync.py pull-workspace
+    python workspace_sync.py status
+
+Or add aliases to your shell profile (~/.bashrc or ~/.bash_profile):
+
+    alias push-workspace='python "C:/Users/docto/Claude Code/workspace-sync/workspace_sync.py" push-workspace'
+    alias pull-workspace='python "C:/Users/docto/Claude Code/workspace-sync/workspace_sync.py" pull-workspace'
+    alias sync-status='python "C:/Users/docto/Claude Code/workspace-sync/workspace_sync.py" status'
+
+Then just type: push-workspace, pull-workspace, sync-status
+
+
+SETTING UP A NEW COMPUTER
+--------------------------
+
+Step 1: Install Dropbox and sign in.
+        Wait for it to sync. Confirm you can see:
+            ~/Dropbox/claude-code-workspace/
+
+Step 2: Create your local workspace directory.
+        This is where you'll work. Example:
+            mkdir -p ~/claude-code-workspace
+        (Use whatever path you want — it doesn't need to match the other
+        computer.)
+
+Step 3: Copy the workspace-sync tool from Dropbox.
+            cp -r ~/Dropbox/claude-code-workspace/workspace-sync ~/workspace-sync
+
+        The tool lives inside the workspace and syncs itself, so it's
+        already in Dropbox after your first push from another machine.
+
+Step 4: Run init.
+            cd ~/workspace-sync
+            python workspace_sync.py init
+
+        It will ask for:
+        - Local workspace path: enter your local path
+          (e.g. ~/claude-code-workspace or C:/Users/you/Claude Code)
+        - Dropbox workspace path: press Enter for the default
+          (~/Dropbox/claude-code-workspace)
+
+        This creates sync-config.json (machine-specific, never synced)
+        and copies .syncignore.default into your local workspace if no
+        .syncignore exists there yet.
+
+Step 5: Pull everything from Dropbox.
+            python workspace_sync.py pull-workspace
+
+        Preview the file list. Type 'y' to proceed. This copies all
+        workspace files from Dropbox into your local directory.
+
+        The first pull will hash every file on the Dropbox side (for the
+        manifest). This may take a few seconds for ~800 files.
+
+Step 6: Add shell aliases (optional but recommended).
+        Add to your ~/.bashrc or ~/.zshrc:
+
+            alias push-workspace='python ~/workspace-sync/workspace_sync.py push-workspace'
+            alias pull-workspace='python ~/workspace-sync/workspace_sync.py pull-workspace'
+            alias sync-status='python ~/workspace-sync/workspace_sync.py status'
+
+        Then: source ~/.bashrc
+
+
+DAILY WORKFLOW
+--------------
+
+On any computer:
+
+1. Start of session:   pull-workspace     (get latest from Dropbox)
+2. Do your work.
+3. End of session:     push-workspace     (send changes to Dropbox)
+
+If you forget to push on one machine and edit on another, the next sync
+will detect conflicts and ask you to choose which version to keep.
+
+
+CONFLICT RESOLUTION
+--------------------
+
+When files differ between local and Dropbox:
+
+  Both exist, different content:
+    [s] keep source version (overwrite dest)
+    [d] keep dest version (overwrite source)
+    [k] skip (do nothing)
+
+  File exists on one side, missing from the other:
+    [c] copy to the other side (restore it)
+    [k] skip (do nothing)
+    Type 'delete' to remove from the side that has it
+
+Deletion always requires typing the full word 'delete' — never a single
+keystroke. Copy [c] and skip [k] are the easy options.
+
+
+FILES
+-----
+
+workspace_sync.py       The sync tool (same on all machines, syncs itself)
+.syncignore.default     Default exclusion patterns (template for new machines)
+sync-config.json        Machine-specific paths (NOT synced — each machine
+                        has its own, created by 'init')
+SETUP.txt               This file
+
+In workspace root:
+.syncignore             Exclusion patterns (syncs via Dropbox — shared
+                        across machines)
+.sync-manifest.json     Sync state (written to both local and Dropbox
+                        after each sync — records content hashes)
+
+
+THE .SYNCIGNORE FILE
+--------------------
+
+Lives in your LOCAL workspace root (not in workspace-sync/).
+Controls what gets excluded from sync. Syncs via Dropbox so all
+machines use the same patterns.
+
+Patterns:
+    dirname/        Exclude entire directory tree wherever it appears
+    *.ext           Exclude files by extension
+    specific/path/  Exclude a specific subdirectory path
+
+Edit the .syncignore in your workspace root to customize. Changes
+propagate to other machines on next push/pull.
+
+
+NOTES
+-----
+
+- sync-config.json is machine-specific. Don't copy it between machines.
+  Run 'init' on each machine instead.
+
+- .syncignore lives in the workspace root and syncs via Dropbox, so
+  changes to exclusion patterns propagate to all machines.
+
+- The workspace-sync/ directory itself lives inside the workspace, so
+  it syncs too — you get tool updates on all machines automatically.
+  Exception: sync-config.json is excluded from sync (hardcoded).
+
+- The manifest stores content hashes (SHA-256), not modification times.
+  This means change detection works correctly across machines regardless
+  of filesystem timestamps.
+
+- Each sync hashes files to detect content changes. For ~800 files this
+  takes a few seconds. Large data files (.npy, .pt, .pkl, etc.) and
+  git-managed repos are excluded by default to keep this fast.
+
+- If you skip a conflict, it will reappear on the next sync (the
+  manifest still records it as previously synced). Resolve conflicts
+  by choosing copy or delete to clear them permanently.

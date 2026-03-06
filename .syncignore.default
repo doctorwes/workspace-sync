@@ -1,0 +1,61 @@
+# Patterns to exclude from workspace sync
+# One pattern per line. Supports:
+#   dir/        — skip entire directory tree
+#   *.ext       — skip files by extension
+#   path/to/dir/ — skip specific subdirectory
+
+# Large data/model files (regenerable)
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.parquet
+*.feather
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# Build/cache artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+
+# Git internals (repos synced via GitHub, not Dropbox)
+.git/
+write-as-wesley-plugin/
+
+# OS junk
+desktop.ini
+Thumbs.db
+.DS_Store
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.nav
+*.snm
+*.synctex.gz
+
+# Claude Code internals
+.claude/
+
+# Riemannian geometry projects (large, git-managed)
+riemannian-latent-geometry/
+riemannian-vit-geometry/
+riemannian-video-geometry/
+
+# Runs output (regenerable)
+runs/
+
+# Generated images from experiments (regenerable)
+figures/
+wandb/
