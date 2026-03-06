@@ -18,6 +18,9 @@
 *.onnx
 *.safetensors
 
+# Large generated datasets (images, activations — regenerable from code)
+data/
+
 # Build/cache artifacts
 __pycache__/
 *.pyc
@@ -36,6 +39,9 @@ desktop.ini
 Thumbs.db
 .DS_Store
 
+# Word/Office temp lock files
+~$*
+
 # LaTeX build artifacts
 *.aux
 *.log
@@ -47,11 +53,6 @@ Thumbs.db
 
 # Claude Code internals
 .claude/
-
-# Riemannian geometry projects (large, git-managed)
-riemannian-latent-geometry/
-riemannian-vit-geometry/
-riemannian-video-geometry/
 
 # Runs output (regenerable)
 runs/
