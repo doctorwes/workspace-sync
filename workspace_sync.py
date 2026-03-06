@@ -569,8 +569,10 @@ def execute_sync(changes: dict, resolutions: list,
             copy_file(dest_root, source_root, key)
         elif action == "delete_source":
             delete_file(source_root, key)
+            deleted += 1
         elif action == "delete_dest":
             delete_file(dest_root, key)
+            deleted += 1
         resolved += 1
 
     return copied, deleted, resolved
