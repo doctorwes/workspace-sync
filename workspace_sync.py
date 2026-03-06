@@ -541,7 +541,11 @@ def execute_sync(changes: dict, resolutions: list,
     resolved = 0
 
     # Copy new/modified files: always source -> dest
-    for key in changes["copy"]:
+    total_copies = len(changes["copy"])
+    if total_copies:
+        print(f"Copying {total_copies} files...")
+    for i, key in enumerate(changes["copy"], 1):
+        print(f"  [{i}/{total_copies}] {key}")
         copy_file(source_root, dest_root, key)
         copied += 1
 
@@ -582,7 +586,11 @@ def build_manifest_files(local_root: Path, remote_root: Path,
     all_keys = set(local_entries) | set(remote_entries)
 
     files = {}
-    for key in sorted(all_keys):
+    sorted_keys = sorted(all_keys)
+    total = len(sorted_keys)
+    for i, key in enumerate(sorted_keys, 1):
+        if i == 1 or i % 100 == 0 or i == total:
+            print(f"  Hashing [{i}/{total}]...")
         # Prefer local for hash (it's the primary copy)
         if key in local_entries:
             h = file_hash(local_root / key)
