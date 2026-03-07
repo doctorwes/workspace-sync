@@ -2,12 +2,13 @@ WORKSPACE SYNC — SETUP INSTRUCTIONS
 =====================================
 
 Syncs your Claude Code workspace between computers via Dropbox.
-No dependencies beyond Python 3.10+ (standard library only).
+No dependencies beyond Python 3.7+ (standard library only).
 
 
 WHAT IT DOES
 ------------
 
+- sync-workspace: bidirectional sync (local <-> Dropbox in one step)
 - push-workspace: copies changed files from local workspace -> Dropbox
 - pull-workspace: copies changed files from Dropbox -> local workspace
 - status: shows what's changed on each side since last sync
@@ -29,17 +30,19 @@ The workspace-sync/ directory lives inside your workspace at:
 
 To use:
     cd "C:/Users/docto/Claude Code/workspace-sync"
+    python workspace_sync.py sync-workspace
     python workspace_sync.py push-workspace
     python workspace_sync.py pull-workspace
     python workspace_sync.py status
 
 Or add aliases to your shell profile (~/.bashrc or ~/.bash_profile):
 
+    alias sync-workspace='python "C:/Users/docto/Claude Code/workspace-sync/workspace_sync.py" sync-workspace'
     alias push-workspace='python "C:/Users/docto/Claude Code/workspace-sync/workspace_sync.py" push-workspace'
     alias pull-workspace='python "C:/Users/docto/Claude Code/workspace-sync/workspace_sync.py" pull-workspace'
     alias sync-status='python "C:/Users/docto/Claude Code/workspace-sync/workspace_sync.py" status'
 
-Then just type: push-workspace, pull-workspace, sync-status
+Then just type: sync-workspace, push-workspace, pull-workspace, sync-status
 
 
 SETTING UP A NEW COMPUTER
@@ -87,6 +90,7 @@ Step 5: Pull everything from Dropbox.
 Step 6: Add shell aliases (optional but recommended).
         Add to your ~/.bashrc or ~/.zshrc:
 
+            alias sync-workspace='python ~/workspace-sync/workspace_sync.py sync-workspace'
             alias push-workspace='python ~/workspace-sync/workspace_sync.py push-workspace'
             alias pull-workspace='python ~/workspace-sync/workspace_sync.py pull-workspace'
             alias sync-status='python ~/workspace-sync/workspace_sync.py status'
@@ -99,9 +103,11 @@ DAILY WORKFLOW
 
 On any computer:
 
-1. Start of session:   pull-workspace     (get latest from Dropbox)
+1. Start of session:   sync-workspace     (bidirectional sync with Dropbox)
 2. Do your work.
-3. End of session:     push-workspace     (send changes to Dropbox)
+3. End of session:     sync-workspace     (sync changes back to Dropbox)
+
+Or use push-workspace / pull-workspace for one-directional sync.
 
 If you forget to push on one machine and edit on another, the next sync
 will detect conflicts and ask you to choose which version to keep.

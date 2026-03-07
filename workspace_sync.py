@@ -2,7 +2,7 @@
 Workspace sync: local workspace <-> Dropbox.
 
 Usage:
-    python workspace_sync.py sync-workspace [--yes]  # local <-> Dropbox (bidirectional)
+    python workspace_sync.py sync-workspace [--yes]  # bidirectional sync
     python workspace_sync.py push-workspace [--yes]  # local -> Dropbox
     python workspace_sync.py pull-workspace [--yes]  # Dropbox -> local
     python workspace_sync.py status                  # show what's changed
@@ -25,6 +25,7 @@ Safety guarantees:
 - First sync with files on both sides hashes to detect true differences
   (never assumes same-size means same-content).
 """
+from __future__ import annotations
 
 import os
 import sys
@@ -363,42 +364,19 @@ def classify_changes(source_entries: dict, dest_entries: dict,
     return result
 
 
-def classify_bidirectional(local_entries: dict, remote_entries: dict,
-                           manifest: dict, local_root: Path,
-                           remote_root: Path) -> dict:
+def classify_changes_bidi(local_entries: dict, remote_entries: dict,
+                          manifest: dict, local_root: Path, remote_root: Path) -> dict:
     """
-    Classify files for bidirectional sync.
+    Bidirectional change classification.
 
-    Returns {
-        'copy_to_remote': [keys],   # local changed, remote didn't
-        'copy_to_local': [keys],    # remote changed, local didn't
-        'conflict': [(key, local_info, remote_info)],
-        'unchanged': [keys],
-    }
-
-    Same safety guarantees as classify_changes: no automatic deletions,
-    missing files become conflicts.
+    Returns {copy_to_remote, copy_to_local, conflict, unchanged}.
+    Same safety rules: no automatic deletions.
     """
     synced = manifest.get("files", {})
     all_keys = set(local_entries) | set(remote_entries) | set(synced)
-    result = {"copy_to_remote": [], "copy_to_local": [], "conflict": [],
-              "unchanged": []}
+    result = {"copy_to_remote": [], "copy_to_local": [], "conflict": [], "unchanged": []}
 
     hashed = 0
-
-    def get_hash(root, key):
-        nonlocal hashed
-        hashed += 1
-        return file_hash(root / key)
-
-    def changed_from_manifest(root, key, entries):
-        """Check if file content differs from manifest. Returns (changed, hash)."""
-        manifest_hash = synced[key].get("hash")
-        size_changed = (entries[key]["size"] != synced[key].get("size"))
-        if size_changed:
-            return True, None
-        h = get_hash(root, key)
-        return (h != manifest_hash), h
 
     for key in sorted(all_keys):
         in_local = key in local_entries
@@ -409,54 +387,77 @@ def classify_bidirectional(local_entries: dict, remote_entries: dict,
             same_size = local_entries[key]["size"] == remote_entries[key]["size"]
 
             if in_man:
-                local_changed, _ = changed_from_manifest(
-                    local_root, key, local_entries)
-                remote_changed, _ = changed_from_manifest(
-                    remote_root, key, remote_entries)
+                manifest_hash = synced[key].get("hash")
+                local_size_changed = (local_entries[key]["size"] != synced[key].get("size"))
+                remote_size_changed = (remote_entries[key]["size"] != synced[key].get("size"))
 
-                if local_changed and not remote_changed:
-                    result["copy_to_remote"].append(key)
-                elif remote_changed and not local_changed:
-                    result["copy_to_local"].append(key)
-                elif local_changed and remote_changed:
-                    # Both changed — check if they changed to the same thing
-                    local_h = get_hash(local_root, key)
-                    remote_h = get_hash(remote_root, key)
-                    if local_h == remote_h:
+                if local_size_changed and not remote_size_changed:
+                    remote_hash = file_hash(remote_root / key)
+                    hashed += 1
+                    if remote_hash == manifest_hash:
+                        result["copy_to_remote"].append(key)
+                    else:
+                        result["conflict"].append((key, local_entries[key], remote_entries[key]))
+                elif remote_size_changed and not local_size_changed:
+                    local_hash = file_hash(local_root / key)
+                    hashed += 1
+                    if local_hash == manifest_hash:
+                        result["copy_to_local"].append(key)
+                    else:
+                        result["conflict"].append((key, local_entries[key], remote_entries[key]))
+                elif local_size_changed and remote_size_changed:
+                    local_hash = file_hash(local_root / key)
+                    remote_hash = file_hash(remote_root / key)
+                    hashed += 2
+                    if local_hash == remote_hash:
                         result["unchanged"].append(key)
                     else:
-                        result["conflict"].append(
-                            (key, local_entries[key], remote_entries[key]))
+                        result["conflict"].append((key, local_entries[key], remote_entries[key]))
                 else:
-                    result["unchanged"].append(key)
+                    local_hash = file_hash(local_root / key)
+                    hashed += 1
+                    local_changed = (local_hash != manifest_hash)
+
+                    if not local_changed:
+                        remote_hash = file_hash(remote_root / key)
+                        hashed += 1
+                        remote_changed = (remote_hash != manifest_hash)
+                        if not remote_changed:
+                            result["unchanged"].append(key)
+                        else:
+                            result["copy_to_local"].append(key)
+                    else:
+                        remote_hash = file_hash(remote_root / key)
+                        hashed += 1
+                        remote_changed = (remote_hash != manifest_hash)
+                        if not remote_changed:
+                            result["copy_to_remote"].append(key)
+                        elif local_hash == remote_hash:
+                            result["unchanged"].append(key)
+                        else:
+                            result["conflict"].append((key, local_entries[key], remote_entries[key]))
             else:
-                # No manifest — first sync
                 if same_size:
-                    local_h = get_hash(local_root, key)
-                    remote_h = get_hash(remote_root, key)
-                    if local_h == remote_h:
+                    local_hash = file_hash(local_root / key)
+                    remote_hash = file_hash(remote_root / key)
+                    hashed += 2
+                    if local_hash == remote_hash:
                         result["unchanged"].append(key)
                     else:
-                        result["conflict"].append(
-                            (key, local_entries[key], remote_entries[key]))
+                        result["conflict"].append((key, local_entries[key], remote_entries[key]))
                 else:
-                    result["conflict"].append(
-                        (key, local_entries[key], remote_entries[key]))
+                    result["conflict"].append((key, local_entries[key], remote_entries[key]))
 
         elif in_local and not in_remote:
             if in_man:
-                # Was synced, now missing from remote
                 result["conflict"].append((key, local_entries[key], None))
             else:
-                # New locally — copy to remote
                 result["copy_to_remote"].append(key)
 
         elif not in_local and in_remote:
             if in_man:
-                # Was synced, now missing from local
                 result["conflict"].append((key, None, remote_entries[key]))
             else:
-                # New on remote — copy to local
                 result["copy_to_local"].append(key)
 
     if hashed > 0:
@@ -703,12 +704,16 @@ def build_manifest_files(local_root: Path, remote_root: Path,
         if i == 1 or i % 100 == 0 or i == total:
             print(f"  Hashing [{i}/{total}]...")
         # Prefer local for hash (it's the primary copy)
-        if key in local_entries:
-            h = file_hash(local_root / key)
-            files[key] = {"hash": h, "size": local_entries[key]["size"]}
-        elif key in remote_entries:
-            h = file_hash(remote_root / key)
-            files[key] = {"hash": h, "size": remote_entries[key]["size"]}
+        try:
+            if key in local_entries:
+                h = file_hash(local_root / key)
+                files[key] = {"hash": h, "size": local_entries[key]["size"]}
+            elif key in remote_entries:
+                h = file_hash(remote_root / key)
+                files[key] = {"hash": h, "size": remote_entries[key]["size"]}
+        except OSError as e:
+            print(f"  WARNING: skipping {key}: {e}")
+            continue
 
     return files
 
@@ -778,6 +783,129 @@ def cmd_sync(direction: str, auto_yes: bool = False):
     print(f"\nDone. Copied: {copied}, Deleted: {deleted}, Conflicts resolved: {resolved}")
 
 
+def cmd_sync_bidi(auto_yes: bool = False):
+    local_root, remote_root = load_config()
+    local_root.mkdir(parents=True, exist_ok=True)
+    remote_root.mkdir(parents=True, exist_ok=True)
+    dir_patterns, file_patterns = load_syncignore(local_root)
+
+    print("Scanning files...")
+    local_entries = scan_tree(local_root, dir_patterns, file_patterns)
+    remote_entries = scan_tree(remote_root, dir_patterns, file_patterns)
+    manifest = load_manifest(local_root)
+
+    print(f"  Local:   {len(local_entries)} files")
+    print(f"  Dropbox: {len(remote_entries)} files")
+
+    changes = classify_changes_bidi(
+        local_entries, remote_entries, manifest, local_root, remote_root
+    )
+
+    to_remote = changes["copy_to_remote"]
+    to_local = changes["copy_to_local"]
+    conflicts = changes["conflict"]
+    unchanged = changes["unchanged"]
+
+    print(f"\n{'=' * 60}")
+    print(f"  SYNC: local <-> Dropbox")
+    print(f"  {local_root}")
+    print(f"    <-> {remote_root}")
+    print(f"{'=' * 60}\n")
+
+    if not to_remote and not to_local and not conflicts:
+        print("  Everything is in sync. Nothing to do.\n")
+        return
+
+    if to_remote:
+        print(f"  COPY local -> Dropbox ({len(to_remote)} files):")
+        for key in to_remote[:50]:
+            print(f"    > {key}")
+        if len(to_remote) > 50:
+            print(f"    ... and {len(to_remote) - 50} more")
+        print()
+
+    if to_local:
+        print(f"  COPY Dropbox -> local ({len(to_local)} files):")
+        for key in to_local[:50]:
+            print(f"    < {key}")
+        if len(to_local) > 50:
+            print(f"    ... and {len(to_local) - 50} more")
+        print()
+
+    if conflicts:
+        print(f"  CONFLICTS ({len(conflicts)} files — requires your input):")
+        for item in conflicts:
+            key = item[0]
+            local_info = item[1]
+            remote_info = item[2]
+            local_label = format_size(local_info["size"]) if local_info else "MISSING"
+            remote_label = format_size(remote_info["size"]) if remote_info else "MISSING"
+            print(f"    ? {key}  [local: {local_label}, dropbox: {remote_label}]")
+        print()
+
+    print(f"  Unchanged: {len(unchanged)} files")
+    print()
+
+    resolutions = []
+    if conflicts:
+        if auto_yes:
+            print("CONFLICTS require interactive resolution. Cannot use --yes.")
+            print("Run again without --yes to resolve conflicts.")
+            return
+        resolutions = resolve_conflicts(conflicts, "local", "dropbox", "sync")
+
+    if not auto_yes:
+        proceed = input("Proceed with sync? [y/n] ").strip().lower()
+        if proceed not in ("y", "yes"):
+            print("Cancelled.")
+            return
+
+    copied = 0
+
+    if to_remote:
+        print(f"Copying {len(to_remote)} files to Dropbox...")
+    for i, key in enumerate(to_remote, 1):
+        print(f"  [{i}/{len(to_remote)}] > {key}")
+        copy_file(local_root, remote_root, key)
+        copied += 1
+
+    if to_local:
+        print(f"Copying {len(to_local)} files to local...")
+    for i, key in enumerate(to_local, 1):
+        print(f"  [{i}/{len(to_local)}] < {key}")
+        copy_file(remote_root, local_root, key)
+        copied += 1
+
+    deleted = 0
+    resolved = 0
+    for key, action in resolutions:
+        if action == "skip":
+            continue
+        elif action == "use_source":
+            copy_file(local_root, remote_root, key)
+        elif action == "use_dest":
+            copy_file(remote_root, local_root, key)
+        elif action == "copy_to_dest":
+            copy_file(local_root, remote_root, key)
+        elif action == "copy_to_source":
+            copy_file(remote_root, local_root, key)
+        elif action == "delete_source":
+            delete_file(local_root, key)
+            deleted += 1
+        elif action == "delete_dest":
+            delete_file(remote_root, key)
+            deleted += 1
+        resolved += 1
+
+    print("Updating manifest...")
+    manifest_files = build_manifest_files(
+        local_root, remote_root, dir_patterns, file_patterns
+    )
+    save_manifests(manifest_files, local_root, remote_root)
+
+    print(f"\nDone. Copied: {copied}, Deleted: {deleted}, Conflicts resolved: {resolved}")
+
+
 def cmd_status():
     local_root, remote_root = load_config()
     dir_patterns, file_patterns = load_syncignore(local_root)
@@ -834,135 +962,6 @@ def cmd_status():
     report_changes(remote_entries, "Dropbox", remote_root)
 
 
-def cmd_sync_workspace(auto_yes: bool = False):
-    """Bidirectional sync: local <-> Dropbox in one step."""
-    local_root, remote_root = load_config()
-    remote_root.mkdir(parents=True, exist_ok=True)
-    dir_patterns, file_patterns = load_syncignore(local_root)
-
-    print("Scanning files...")
-    local_entries = scan_tree(local_root, dir_patterns, file_patterns)
-    remote_entries = scan_tree(remote_root, dir_patterns, file_patterns)
-    manifest = load_manifest(local_root)
-
-    print(f"  Local:   {len(local_entries)} files")
-    print(f"  Dropbox: {len(remote_entries)} files")
-
-    changes = classify_bidirectional(
-        local_entries, remote_entries, manifest, local_root, remote_root
-    )
-
-    to_remote = changes["copy_to_remote"]
-    to_local = changes["copy_to_local"]
-    conflicts = changes["conflict"]
-    unchanged = changes["unchanged"]
-
-    print(f"\n{'=' * 60}")
-    print(f"  SYNC: local <-> Dropbox")
-    print(f"  {local_root}")
-    print(f"  {remote_root}")
-    print(f"{'=' * 60}\n")
-
-    if not to_remote and not to_local and not conflicts:
-        print("  Everything is in sync. Nothing to do.\n")
-        return
-
-    if to_remote:
-        print(f"  LOCAL -> DROPBOX ({len(to_remote)} files):")
-        for key in to_remote[:50]:
-            print(f"    > {key}")
-        if len(to_remote) > 50:
-            print(f"    ... and {len(to_remote) - 50} more")
-        print()
-
-    if to_local:
-        print(f"  DROPBOX -> LOCAL ({len(to_local)} files):")
-        for key in to_local[:50]:
-            print(f"    < {key}")
-        if len(to_local) > 50:
-            print(f"    ... and {len(to_local) - 50} more")
-        print()
-
-    if conflicts:
-        print(f"  CONFLICTS ({len(conflicts)} files — requires your input):")
-        for item in conflicts:
-            key = item[0]
-            local_info = item[1]
-            remote_info = item[2]
-            local_label = format_size(local_info["size"]) if local_info else "MISSING"
-            remote_label = format_size(remote_info["size"]) if remote_info else "MISSING"
-            print(f"    ? {key}  [local: {local_label}, dropbox: {remote_label}]")
-        print()
-
-    print(f"  Unchanged: {len(unchanged)} files")
-    print()
-
-    # Resolve conflicts
-    resolutions = []
-    if conflicts:
-        if auto_yes:
-            print("CONFLICTS require interactive resolution. Cannot use --yes.")
-            print("Run again without --yes to resolve conflicts.")
-            return
-        resolutions = resolve_conflicts(conflicts, "local", "dropbox", "sync")
-
-    if not auto_yes:
-        proceed = input("Proceed with sync? [y/n] ").strip().lower()
-        if proceed not in ("y", "yes"):
-            print("Cancelled.")
-            return
-
-    # Execute copies
-    copied = 0
-    deleted = 0
-    total_to_remote = len(to_remote)
-    total_to_local = len(to_local)
-
-    if total_to_remote:
-        print(f"Copying {total_to_remote} files local -> Dropbox...")
-    for i, key in enumerate(to_remote, 1):
-        print(f"  [{i}/{total_to_remote}] {key}")
-        copy_file(local_root, remote_root, key)
-        copied += 1
-
-    if total_to_local:
-        print(f"Copying {total_to_local} files Dropbox -> local...")
-    for i, key in enumerate(to_local, 1):
-        print(f"  [{i}/{total_to_local}] {key}")
-        copy_file(remote_root, local_root, key)
-        copied += 1
-
-    # Execute conflict resolutions
-    resolved = 0
-    for key, action in resolutions:
-        if action == "skip":
-            continue
-        elif action == "use_source":
-            copy_file(local_root, remote_root, key)
-        elif action == "use_dest":
-            copy_file(remote_root, local_root, key)
-        elif action == "copy_to_dest":
-            copy_file(local_root, remote_root, key)
-        elif action == "copy_to_source":
-            copy_file(remote_root, local_root, key)
-        elif action == "delete_source":
-            delete_file(local_root, key)
-            deleted += 1
-        elif action == "delete_dest":
-            delete_file(remote_root, key)
-            deleted += 1
-        resolved += 1
-
-    # Build manifest
-    print("Updating manifest...")
-    manifest_files = build_manifest_files(
-        local_root, remote_root, dir_patterns, file_patterns
-    )
-    save_manifests(manifest_files, local_root, remote_root)
-
-    print(f"\nDone. Copied: {copied}, Deleted: {deleted}, Conflicts resolved: {resolved}")
-
-
 def main():
     if len(sys.argv) < 2:
         print("Usage: python workspace_sync.py [init|sync-workspace|push-workspace|pull-workspace|status] [--yes]")
@@ -971,7 +970,7 @@ def main():
     cmd = sys.argv[1]
     auto_yes = "--yes" in sys.argv or "-y" in sys.argv
     if cmd == "sync-workspace":
-        cmd_sync_workspace(auto_yes=auto_yes)
+        cmd_sync_bidi(auto_yes=auto_yes)
     elif cmd == "push-workspace":
         cmd_sync("push", auto_yes=auto_yes)
     elif cmd == "pull-workspace":
